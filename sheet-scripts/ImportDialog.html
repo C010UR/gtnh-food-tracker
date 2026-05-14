@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500&family=Roboto+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --google-blue: #1a73e8;
+            --google-blue-hover: #1765cc;
+            --google-blue-focus: #e8f0fe;
+            --text-primary: #202124;
+            --text-secondary: #5f6368;
+            --border: #dadce0;
+            --bg-code: #f1f3f4;
+        }
+
+        body {
+            font-family: 'Google Sans', 'Roboto', Arial, sans-serif;
+            color: var(--text-primary);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh);
+            box-sizing: border-box;
+        }
+
+        p {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+
+        code {
+            background: var(--bg-code);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 12px;
+        }
+
+        textarea {
+            flex: 1;
+            width: 100%;
+            margin-bottom: 20px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 13px;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 12px;
+            box-sizing: border-box;
+            resize: none;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        textarea:focus {
+            border-color: var(--google-blue);
+            box-shadow: 0 0 0 1px var(--google-blue);
+        }
+
+        textarea::placeholder {
+            color: #9aa0a6;
+        }
+
+        .btns {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        button {
+            font-family: 'Google Sans', 'Roboto', Arial, sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 4px;
+            padding: 0 24px;
+            height: 36px;
+            cursor: pointer;
+            border: none;
+            outline: none;
+            transition: background-color 0.2s, box-shadow 0.2s;
+        }
+
+        .btn-cancel {
+            background: transparent;
+            color: var(--google-blue);
+        }
+
+        .btn-cancel:hover {
+            background: var(--google-blue-focus);
+        }
+
+        .btn-cancel:focus {
+            box-shadow: 0 0 0 2px var(--google-blue-focus);
+        }
+
+        .btn-primary {
+            background: var(--google-blue);
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background: var(--google-blue-hover);
+            box-shadow: 0 1px 3px rgba(26, 115, 232, 0.4);
+        }
+
+        .btn-primary:focus {
+            box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.5);
+        }
+
+        .btn-primary:disabled {
+            background: #aecbfa;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+    </style>
+</head>
+
+<body>
+    <p>Paste your minimized JSON array (e.g. <code>[{"n":"Apple","m":"(Vanilla)","h":4}]</code>):</p>
+    <textarea id="jsonInput" placeholder="Paste JSON here..."></textarea>
+    <div class="btns">
+        <button class="btn-cancel" onclick="google.script.host.close()">Cancel</button>
+        <button class="btn-primary" id="submitBtn" onclick="submit()">Import</button>
+    </div>
+    <script>
+        function submit() {
+            const btn = document.getElementById('submitBtn');
+            const raw = document.getElementById('jsonInput').value;
+
+            btn.disabled = true;
+            btn.textContent = 'Importing...';
+
+            google.script.run
+                .withSuccessHandler(() => google.script.host.close())
+                .withFailureHandler((err) => {
+                    console.error(err);
+                    alert('Import failed: ' + err.message);
+                    btn.disabled = false;
+                    btn.textContent = 'Import';
+                })
+                .processImportedJson(raw);
+        }
+    </script>
+</body>
+
+</html>
