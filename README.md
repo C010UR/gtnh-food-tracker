@@ -88,3 +88,6 @@ Navigate to the generated `output/` director, copy the contents of generate JSON
 4. Click **Import**.
 
 The script will automatically parse the input, cross-reference it against the `All` sheet, and update the checkboxes. It will also alert you to any missing items or hunger value discrepancies.
+
+<img width="666" height="517" alt="{9C3F63BC-8CDC-4CB1-AFFF-09878FC865B8}" src="https://github.com/user-attachments/assets/dd5c3514-3def-411c-a902-612c1e452495" />
+
