@@ -50,7 +50,12 @@ function ModToShort(mod) {
     minecraft: "(Vanilla)",
     fether: "(fether)",
     cropsnh: "(cropsnh)",
-    BloodArsenal: "(BloodArsenal)"
+    BloodArsenal: "(BloodArsenal)",
+    Avaritia: "(Avaritia)",
+    Thaumcraft: "(Thaumcraft)",
+    ForbiddenMagic: "(ForbiddenMagic)",
+    WitchingGadgets: "(WitchingGadgets)",
+    miscutils: "(miscutils)"
   };
   return map[mod] || `(${mod})`;
 }
@@ -86,11 +91,10 @@ const aliasFix = {
   "i:cropsnh:berry:2": { name: "Pear", mod: "cropsnh" }
 };
 
-// Optional hunger corrections if your spreadsheet is the source of truth.
 const hungerOverrides = {
-  "Berry Medley": 3,
-  "Pear": 3,
-  "Beef Wellington": 16
+  "Berry Medley (cropsnh)": 3,
+  "Pear (cropsnh)": 3,
+  "Beef Wellington (Pam)": 16
 };
 
 class Repository {
@@ -99,7 +103,6 @@ class Repository {
     this.objectPositionMap = {};
     this.bytes = new Uint8Array(data);
     this.elements = new Int32Array(data);
-    this.view = new DataView(data);
     this.textReader = new TextDecoder();
 
     if (this.elements[0] !== DATA_VERSION) {
@@ -141,7 +144,6 @@ class Repository {
     const length = this.elements[pointer];
     const begin = pointer * 4 + 4;
     const str = this.textReader.decode(this.bytes.subarray(begin, begin + length));
-
     this.objects[pointer] = str;
     return str;
   }
@@ -258,12 +260,21 @@ function normalizeNameAndMod(tag, damage, rawItem) {
     name += stewSuffixes[damage % 14] || "";
   }
 
+  if (name === "Mushroom Stew" && modshort === "(Vanilla)") {
+    name = "Mushroom Stew";
+  }
+
   return { name, modshort };
 }
 
-function applyHungerOverride(name, hunger) {
-  if (name in hungerOverrides) {
-    return hungerOverrides[name];
+function displayName(name, modshort) {
+  return modshort ? `${name} ${modshort}` : name;
+}
+
+function applyHungerOverride(name, modshort, hunger) {
+  const key = displayName(name, modshort);
+  if (key in hungerOverrides) {
+    return hungerOverrides[key];
   }
   return hunger;
 }
@@ -286,10 +297,24 @@ function makeNotFoundResult(tag, damage, repo, candidates) {
   return {
     n: repoTag,
     m: "- ERROR IN DB LOOKUP",
+    h: null,
     notfound: true,
     candidates,
     possibleMatches
   };
+}
+
+function safeGetFoods(parsedPlayer) {
+  return parsedPlayer?.value?.ForgeData?.value?.PlayerPersisted?.value?.SpiceOfLifeHistory?.value?.FullHistory?.value?.Foods?.value?.value || [];
+}
+
+function buildIdToTag(parsedLevel) {
+  const itemData = parsedLevel?.value?.FML?.value?.ItemData?.value?.value || [];
+  const map = [];
+  for (const x of itemData) {
+    map[x.V.value] = x.K.value.slice(1);
+  }
+  return map;
 }
 
 async function processPlayer(playerPath, parsedLevel, repo) {
@@ -299,21 +324,9 @@ async function processPlayer(playerPath, parsedLevel, repo) {
   }
 
   const parsedPlayer = await parseNBT(playerBuf);
+  const IdToTag = buildIdToTag(parsedLevel);
 
-  const itemData = parsedLevel.value.FML.value.ItemData.value.value || [];
-  const nameIdMatcher = itemData.map(x => ({
-    id: x.V.value,
-    tag: x.K.value.slice(1)
-  }));
-
-  const IdToTag = [];
-  nameIdMatcher.forEach(x => {
-    IdToTag[x.id] = x.tag;
-  });
-
-  const foods =
-    parsedPlayer.value?.ForgeData?.value?.PlayerPersisted?.value?.SpiceOfLifeHistory?.value?.FullHistory?.value?.Foods?.value?.value || [];
-
+  const foods = safeGetFoods(parsedPlayer);
   const eaten = foods.map(x => ({
     id: x.id?.value,
     damage: x.Damage?.value ?? 0,
@@ -322,6 +335,7 @@ async function processPlayer(playerPath, parsedLevel, repo) {
 
   return eaten.map(x => {
     const tag = IdToTag[x.id];
+
     if (!tag) {
       return {
         n: `unknown-id:${x.id}:${x.damage}`,
@@ -333,7 +347,7 @@ async function processPlayer(playerPath, parsedLevel, repo) {
 
     const special = normalizeSpecialItem(tag, x.damage, x.hunger);
     if (special) {
-      special.h = applyHungerOverride(special.n, special.h);
+      special.h = applyHungerOverride(special.n, special.m, special.h);
       return special;
     }
 
@@ -344,7 +358,7 @@ async function processPlayer(playerPath, parsedLevel, repo) {
     }
 
     const { name, modshort } = normalizeNameAndMod(tag, x.damage, lookup.item);
-    const hunger = applyHungerOverride(name, x.hunger);
+    const hunger = applyHungerOverride(name, modshort, x.hunger);
 
     return {
       n: name,
@@ -390,7 +404,11 @@ async function main() {
   }
 
   const repoData = ungzip(fs.readFileSync(repoBinPath));
-  const repo = Repository.load(repoData.buffer);
+  const repoBuffer = repoData.buffer.slice(
+    repoData.byteOffset,
+    repoData.byteOffset + repoData.byteLength
+  );
+  const repo = Repository.load(repoBuffer);
 
   for (const player of whitelist) {
     const { uuid, name } = player;
