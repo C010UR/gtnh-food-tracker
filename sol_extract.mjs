@@ -91,17 +91,6 @@ const aliasFix = {
   "i:cropsnh:berry:2": { name: "Pear", mod: "cropsnh" }
 };
 
-const hungerOverrides = {
-  "Berry Medley (cropsnh)": 3,
-  "Pear (cropsnh)": 3,
-  "Beef Wellington (Pam)": 16
-};
-
-const forceQualifiedNames = new Set([
-  "fether",
-  "cropsnh"
-]);
-
 class Repository {
   constructor(data) {
     this.objects = {};
@@ -199,15 +188,21 @@ function lookupItem(repo, tag, damage) {
 
   for (const id of candidates) {
     const item = repo.getById(id);
-    if (item) return { item, source: "repo", matchedId: id };
+    if (item) {
+      return { item, source: "repo", matchedId: id };
+    }
   }
 
   for (const id of candidates) {
-    if (manualFix[id]) return { item: manualFix[id], source: "manualFix", matchedId: id };
+    if (manualFix[id]) {
+      return { item: manualFix[id], source: "manualFix", matchedId: id };
+    }
   }
 
   for (const id of candidates) {
-    if (aliasFix[id]) return { item: aliasFix[id], source: "aliasFix", matchedId: id };
+    if (aliasFix[id]) {
+      return { item: aliasFix[id], source: "aliasFix", matchedId: id };
+    }
   }
 
   return {
@@ -223,11 +218,11 @@ function normalizeSpecialItem(tag, damage, hunger) {
     let name = "Golden Apple";
     if (damage === 0) name = "Golden Apple (Ingots)";
     else if (damage === 1) name = "Golden Apple (Blocks)";
-    return { n: name, m: "(Vanilla)", h: hunger, rawMod: "minecraft" };
+    return { n: name, m: "(Vanilla)", h: hunger };
   }
 
   if (pamFix[tag]) {
-    return { n: pamFix[tag], m: "(Pam)", h: hunger, rawMod: "harvestcraft" };
+    return { n: pamFix[tag], m: "(Pam)", h: hunger };
   }
 
   return null;
@@ -236,7 +231,6 @@ function normalizeSpecialItem(tag, damage, hunger) {
 function normalizeNameAndMod(tag, damage, rawItem) {
   let name = decode(rawItem.name);
   let modshort = ModToShort(rawItem.mod);
-  let rawMod = rawItem.mod;
 
   if (modshort === "(GT)" && name === "Dough") {
     if (damage === 32561) name = "Dough in Bread Shape";
@@ -260,20 +254,13 @@ function normalizeNameAndMod(tag, damage, rawItem) {
     name += stewSuffixes[damage % 14] || "";
   }
 
-  return { name, modshort, rawMod };
-}
-
-function qualifiedName(name, modshort) {
-  return modshort ? `${name} ${modshort}` : name;
-}
-
-function shouldForceQualifiedName(rawMod) {
-  return forceQualifiedNames.has(rawMod);
+  return { name, modshort };
 }
 
 function applyHungerOverride(name, modshort, hunger) {
-  const key = qualifiedName(name, modshort);
-  if (key in hungerOverrides) return hungerOverrides[key];
+  if (name === "Berry Medley" && modshort === "(cropsnh)") return 3;
+  if (name === "Pear" && modshort === "(cropsnh)") return 3;
+  if (name === "Beef Wellington" && modshort === "(Pam)") return 16;
   return hunger;
 }
 
@@ -315,13 +302,6 @@ function buildIdToTag(parsedLevel) {
   return map;
 }
 
-function finalizeOutputName(name, modshort, rawMod) {
-  if (shouldForceQualifiedName(rawMod)) {
-    return qualifiedName(name, modshort);
-  }
-  return name;
-}
-
 async function processPlayer(playerPath, parsedLevel, repo) {
   let playerBuf = fs.readFileSync(playerPath);
   if (isGzipped(playerBuf)) {
@@ -353,21 +333,20 @@ async function processPlayer(playerPath, parsedLevel, repo) {
     const special = normalizeSpecialItem(tag, x.damage, x.hunger);
     if (special) {
       special.h = applyHungerOverride(special.n, special.m, special.h);
-      special.n = finalizeOutputName(special.n, special.m, special.rawMod);
-      return { n: special.n, m: special.m, h: special.h };
+      return special;
     }
 
     const lookup = lookupItem(repo, tag, x.damage);
+
     if (!lookup.item) {
       return makeNotFoundResult(tag, x.damage, repo, lookup.candidates);
     }
 
-    const { name, modshort, rawMod } = normalizeNameAndMod(tag, x.damage, lookup.item);
+    const { name, modshort } = normalizeNameAndMod(tag, x.damage, lookup.item);
     const hunger = applyHungerOverride(name, modshort, x.hunger);
-    const finalName = finalizeOutputName(name, modshort, rawMod);
 
     return {
-      n: finalName,
+      n: name,
       m: modshort,
       h: hunger
     };
