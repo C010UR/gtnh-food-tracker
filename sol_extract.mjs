@@ -48,6 +48,9 @@ function ModToShort(mod) {
     BiomesOPlenty: "(BoP)",
     cookingforblockheads: "(Cooking for BH)",
     minecraft: "(Vanilla)",
+    fether: "(fether)",
+    cropsnh: "(cropsnh)",
+    BloodArsenal: "(BloodArsenal)"
   };
   return map[mod] || `(${mod})`;
 }
@@ -68,7 +71,26 @@ const pamFix = {
 const manualFix = {
   "i:BloodArsenal:blood_cake:0": { name: "Blood Cake", mod: "BloodArsenal" },
   "i:TConstruct:strangeFood:2": { name: "Bacon", mod: "TConstruct" },
-  "i:Forestry:beverage:1": { name: "Curative Mead", mod: "Forestry" },
+  "i:Forestry:beverage:1": { name: "Curative Mead", mod: "Forestry" }
+};
+
+const aliasFix = {
+  "i:fether:blood_leaf:0": { name: "Blood Leaf", mod: "fether" },
+  "i:fether:flesh_root:0": { name: "Flesh Root", mod: "fether" },
+  "i:fether:ignis_fruit:0": { name: "Ignis Fruit", mod: "fether" },
+  "i:fether:glow_flower_seeds:0": { name: "Glow Flower Seeds", mod: "fether" },
+  "i:fether:marrow_berry:0": { name: "Marrow Berry", mod: "fether" },
+  "i:cropsnh:goldfish:0": { name: "Goldfish", mod: "cropsnh" },
+  "i:cropsnh:berry:0": { name: "Berry", mod: "cropsnh" },
+  "i:cropsnh:berry:1": { name: "Berry Medley", mod: "cropsnh" },
+  "i:cropsnh:berry:2": { name: "Pear", mod: "cropsnh" }
+};
+
+// Optional hunger corrections if your spreadsheet is the source of truth.
+const hungerOverrides = {
+  "Berry Medley": 3,
+  "Pear": 3,
+  "Beef Wellington": 16
 };
 
 class Repository {
@@ -80,9 +102,13 @@ class Repository {
     this.view = new DataView(data);
     this.textReader = new TextDecoder();
 
-    if (this.elements[0] !== DATA_VERSION) throw new Error("Unsupported data version");
+    if (this.elements[0] !== DATA_VERSION) {
+      throw new Error("Unsupported data version");
+    }
 
-    [1, 2, 3, 5].forEach(idx => this.fillObjectPositionMap(this.getSlice(this.elements[idx])));
+    [1, 2, 3, 5].forEach(idx => {
+      this.fillObjectPositionMap(this.getSlice(this.elements[idx]));
+    });
 
     const remap = this.getSlice(this.elements[7]);
     for (let i = 0; i < remap.length; i++) {
@@ -104,7 +130,7 @@ class Repository {
   }
 
   getById(id) {
-    if (!id || !this.objectPositionMap[id]) return null;
+    if (!id || this.objectPositionMap[id] == null) return null;
     return new Item(this, this.objectPositionMap[id]);
   }
 
@@ -123,6 +149,20 @@ class Repository {
   getSlice(pointer) {
     return this.elements.subarray(pointer + 1, pointer + 1 + this.elements[pointer]);
   }
+
+  findIdsContaining(text, limit = 20) {
+    const needle = String(text || "").toLowerCase();
+    if (!needle) return [];
+
+    const results = [];
+    for (const id of Object.keys(this.objectPositionMap)) {
+      if (id.toLowerCase().includes(needle)) {
+        results.push(id);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
+  }
 }
 
 class Item {
@@ -130,69 +170,187 @@ class Item {
     this.repository = repository;
     this.offset = offset;
   }
-  get name() { return this.repository.getString(this.repository.elements[this.offset + 5]); }
-  get mod() { return this.repository.getString(this.repository.elements[this.offset + 6]); }
+
+  get name() {
+    return this.repository.getString(this.repository.elements[this.offset + 5]);
+  }
+
+  get mod() {
+    return this.repository.getString(this.repository.elements[this.offset + 6]);
+  }
+}
+
+function buildRepoCandidates(tag, damage) {
+  return [
+    `i:${tag}:${damage}`,
+    `i:${tag}Item:${damage}`
+  ];
+}
+
+function lookupItem(repo, tag, damage) {
+  const candidates = buildRepoCandidates(tag, damage);
+
+  for (const id of candidates) {
+    const item = repo.getById(id);
+    if (item) {
+      return { item, source: "repo", matchedId: id };
+    }
+  }
+
+  for (const id of candidates) {
+    if (manualFix[id]) {
+      return { item: manualFix[id], source: "manualFix", matchedId: id };
+    }
+  }
+
+  for (const id of candidates) {
+    if (aliasFix[id]) {
+      return { item: aliasFix[id], source: "aliasFix", matchedId: id };
+    }
+  }
+
+  return {
+    item: null,
+    source: null,
+    matchedId: candidates[0],
+    candidates
+  };
+}
+
+function normalizeSpecialItem(tag, damage, hunger) {
+  if (tag === "minecraft:golden_apple") {
+    let name = "Golden Apple";
+    if (damage === 0) name = "Golden Apple (Ingots)";
+    else if (damage === 1) name = "Golden Apple (Blocks)";
+    return { n: name, m: "(Vanilla)", h: hunger };
+  }
+
+  if (pamFix[tag]) {
+    return { n: pamFix[tag], m: "(Pam)", h: hunger };
+  }
+
+  return null;
+}
+
+function normalizeNameAndMod(tag, damage, rawItem) {
+  let name = decode(rawItem.name);
+  let modshort = ModToShort(rawItem.mod);
+
+  if (modshort === "(GT)" && name === "Dough") {
+    if (damage === 32561) name = "Dough in Bread Shape";
+    else if (damage === 32562) name = "Dough in Bun Shape";
+    else if (damage === 32563) name = "Dough in Baguette Shape";
+  }
+
+  if (modshort === "(GT)" && name === "Fries" && damage === 32204) {
+    name = "Fries (In Foil)";
+  }
+
+  if (modshort === "(Natura)" && tag === "Natura:natura.stewbowl") {
+    name = damage >= 14 ? "Glowshroom " : "Mushroom ";
+    const stewSuffixes = {
+      0: "Stew 1",
+      3: "Stew 2",
+      5: "Stew 3",
+      12: "Stew 4",
+      13: "Stew 5"
+    };
+    name += stewSuffixes[damage % 14] || "";
+  }
+
+  return { name, modshort };
+}
+
+function applyHungerOverride(name, hunger) {
+  if (name in hungerOverrides) {
+    return hungerOverrides[name];
+  }
+  return hunger;
+}
+
+function makeNotFoundResult(tag, damage, repo, candidates) {
+  const repoTag = `i:${tag}:${damage}`;
+  const searchTerm = (tag || "").split(":").pop() || tag;
+  const possibleMatches = repo.findIdsContaining(searchTerm, 10);
+
+  if (possibleMatches.length > 0) {
+    console.log(
+      `${colors.yellow}[WARN]${colors.reset} DB miss for ${repoTag} | possible matches: ${possibleMatches.join(", ")}`
+    );
+  } else {
+    console.log(
+      `${colors.yellow}[WARN]${colors.reset} DB miss for ${repoTag} | no similar IDs found`
+    );
+  }
+
+  return {
+    n: repoTag,
+    m: "- ERROR IN DB LOOKUP",
+    notfound: true,
+    candidates,
+    possibleMatches
+  };
 }
 
 async function processPlayer(playerPath, parsedLevel, repo) {
   let playerBuf = fs.readFileSync(playerPath);
-  if (isGzipped(playerBuf)) playerBuf = Buffer.from(ungzip(playerBuf));
-  
+  if (isGzipped(playerBuf)) {
+    playerBuf = Buffer.from(ungzip(playerBuf));
+  }
+
   const parsedPlayer = await parseNBT(playerBuf);
-  const name_id_matcher = parsedLevel.value.FML.value.ItemData.value.value.map((x) => ({
+
+  const itemData = parsedLevel.value.FML.value.ItemData.value.value || [];
+  const nameIdMatcher = itemData.map(x => ({
     id: x.V.value,
-    tag: x.K.value.slice(1),
+    tag: x.K.value.slice(1)
   }));
 
   const IdToTag = [];
-  name_id_matcher.forEach((x) => (IdToTag[x.id] = x.tag));
+  nameIdMatcher.forEach(x => {
+    IdToTag[x.id] = x.tag;
+  });
 
-  const eaten = parsedPlayer.value.ForgeData.value.PlayerPersisted.value
-    .SpiceOfLifeHistory.value.FullHistory.value.Foods.value.value.map((x) => ({
-      id: x.id?.value,
-      damage: x.Damage?.value ?? 0,
-      hunger: x.Hunger?.value ?? null,
-    }));
+  const foods =
+    parsedPlayer.value?.ForgeData?.value?.PlayerPersisted?.value?.SpiceOfLifeHistory?.value?.FullHistory?.value?.Foods?.value?.value || [];
 
-  return eaten.map((x) => {
+  const eaten = foods.map(x => ({
+    id: x.id?.value,
+    damage: x.Damage?.value ?? 0,
+    hunger: x.Hunger?.value ?? null
+  }));
+
+  return eaten.map(x => {
     const tag = IdToTag[x.id];
-    
-    if (tag === "minecraft:golden_apple") {
-      let name = "Golden Apple";
-      if (x.damage === 0) name = "Golden Apple (Ingots)";
-      else if (x.damage === 1) name = "Golden Apple (Blocks)";
-      return { n: name, m: "(Vanilla)", h: x.hunger };
+    if (!tag) {
+      return {
+        n: `unknown-id:${x.id}:${x.damage}`,
+        m: "- ERROR UNKNOWN ITEM ID",
+        h: x.hunger,
+        notfound: true
+      };
     }
 
-    if (pamFix[tag]) {
-      return { n: pamFix[tag], m: "(Pam)", h: x.hunger };
+    const special = normalizeSpecialItem(tag, x.damage, x.hunger);
+    if (special) {
+      special.h = applyHungerOverride(special.n, special.h);
+      return special;
     }
 
-    const repoTag = `i:${tag}:${x.damage}`;
-    let item = repo.getById(repoTag) || repo.getById(`i:${tag}Item:${x.damage}`) || manualFix[repoTag];
+    const lookup = lookupItem(repo, tag, x.damage);
 
-    if (!item) return { n: repoTag, m: "- ERROR IN DB LOOKUP", notfound: true };
-
-    let name = decode(item.name);
-    let modshort = ModToShort(item.mod);
-
-    if (modshort === "(GT)" && name === "Dough") {
-      if (x.damage === 32561) name = "Dough in Bread Shape";
-      else if (x.damage === 32562) name = "Dough in Bun Shape";
-      else if (x.damage === 32563) name = "Dough in Baguette Shape";
+    if (!lookup.item) {
+      return makeNotFoundResult(tag, x.damage, repo, lookup.candidates);
     }
 
-    if (modshort === "(GT)" && name === "Fries" && x.damage === 32204) {
-      name = "Fries (In Foil)";
-    }
+    const { name, modshort } = normalizeNameAndMod(tag, x.damage, lookup.item);
+    const hunger = applyHungerOverride(name, x.hunger);
 
-    if (modshort === "(Natura)" && tag === "Natura:natura.stewbowl") {
-      name = x.damage >= 14 ? "Glowshroom " : "Mushroom ";
-      const stewSuffixes = { 0: "Stew 1", 3: "Stew 2", 5: "Stew 3", 12: "Stew 4", 13: "Stew 5" };
-      name += stewSuffixes[x.damage % 14] || "";
-    }
-
-    return { n: name, m: modshort, h: x.hunger };
+    return {
+      n: name,
+      m: modshort,
+      h: hunger
+    };
   });
 }
 
@@ -213,11 +371,25 @@ async function main() {
   }
 
   const levelPath = path.join(worldPath, "level.dat");
+  if (!fs.existsSync(levelPath)) {
+    console.error(`${colors.red}[ERROR]${colors.reset} level.dat not found: ${levelPath}`);
+    process.exit(1);
+  }
+
   let levelBuf = fs.readFileSync(levelPath);
-  if (isGzipped(levelBuf)) levelBuf = Buffer.from(ungzip(levelBuf));
-  
+  if (isGzipped(levelBuf)) {
+    levelBuf = Buffer.from(ungzip(levelBuf));
+  }
+
   const parsedLevel = await parseNBT(levelBuf);
-  const repoData = ungzip(fs.readFileSync("./data.bin"));
+
+  const repoBinPath = path.resolve("./data.bin");
+  if (!fs.existsSync(repoBinPath)) {
+    console.error(`${colors.red}[ERROR]${colors.reset} data.bin not found!`);
+    process.exit(1);
+  }
+
+  const repoData = ungzip(fs.readFileSync(repoBinPath));
   const repo = Repository.load(repoData.buffer);
 
   for (const player of whitelist) {
@@ -230,11 +402,11 @@ async function main() {
     }
 
     console.log(`${colors.cyan}[INFO]${colors.reset} Processing ${name}...`);
-    
+
     try {
       const result = await processPlayer(playerPath, parsedLevel, repo);
       const outPath = path.join(outputDir, `${name}.json`);
-      fs.writeFileSync(outPath, JSON.stringify(result, null, null), "utf8");
+      fs.writeFileSync(outPath, JSON.stringify(result, null, 2), "utf8");
       console.log(`${colors.green}[OK]${colors.reset} Wrote ${name}.json`);
     } catch (err) {
       console.error(`${colors.red}[ERROR]${colors.reset} Failed processing ${name}: ${err.message}`);
@@ -244,4 +416,7 @@ async function main() {
   console.log(`\n${colors.cyan}[DONE]${colors.reset} Execution finished.`);
 }
 
-main().catch(err => console.error(`${colors.red}[FATAL]${colors.reset}`, err));
+main().catch(err => {
+  console.error(`${colors.red}[FATAL]${colors.reset}`, err);
+  process.exit(1);
+});
