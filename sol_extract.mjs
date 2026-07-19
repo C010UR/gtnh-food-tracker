@@ -97,6 +97,11 @@ const hungerOverrides = {
   "Beef Wellington (Pam)": 16
 };
 
+const forceQualifiedNames = new Set([
+  "fether",
+  "cropsnh"
+]);
+
 class Repository {
   constructor(data) {
     this.objects = {};
@@ -194,21 +199,15 @@ function lookupItem(repo, tag, damage) {
 
   for (const id of candidates) {
     const item = repo.getById(id);
-    if (item) {
-      return { item, source: "repo", matchedId: id };
-    }
+    if (item) return { item, source: "repo", matchedId: id };
   }
 
   for (const id of candidates) {
-    if (manualFix[id]) {
-      return { item: manualFix[id], source: "manualFix", matchedId: id };
-    }
+    if (manualFix[id]) return { item: manualFix[id], source: "manualFix", matchedId: id };
   }
 
   for (const id of candidates) {
-    if (aliasFix[id]) {
-      return { item: aliasFix[id], source: "aliasFix", matchedId: id };
-    }
+    if (aliasFix[id]) return { item: aliasFix[id], source: "aliasFix", matchedId: id };
   }
 
   return {
@@ -224,11 +223,11 @@ function normalizeSpecialItem(tag, damage, hunger) {
     let name = "Golden Apple";
     if (damage === 0) name = "Golden Apple (Ingots)";
     else if (damage === 1) name = "Golden Apple (Blocks)";
-    return { n: name, m: "(Vanilla)", h: hunger };
+    return { n: name, m: "(Vanilla)", h: hunger, rawMod: "minecraft" };
   }
 
   if (pamFix[tag]) {
-    return { n: pamFix[tag], m: "(Pam)", h: hunger };
+    return { n: pamFix[tag], m: "(Pam)", h: hunger, rawMod: "harvestcraft" };
   }
 
   return null;
@@ -237,6 +236,7 @@ function normalizeSpecialItem(tag, damage, hunger) {
 function normalizeNameAndMod(tag, damage, rawItem) {
   let name = decode(rawItem.name);
   let modshort = ModToShort(rawItem.mod);
+  let rawMod = rawItem.mod;
 
   if (modshort === "(GT)" && name === "Dough") {
     if (damage === 32561) name = "Dough in Bread Shape";
@@ -260,22 +260,20 @@ function normalizeNameAndMod(tag, damage, rawItem) {
     name += stewSuffixes[damage % 14] || "";
   }
 
-  if (name === "Mushroom Stew" && modshort === "(Vanilla)") {
-    name = "Mushroom Stew";
-  }
-
-  return { name, modshort };
+  return { name, modshort, rawMod };
 }
 
-function displayName(name, modshort) {
+function qualifiedName(name, modshort) {
   return modshort ? `${name} ${modshort}` : name;
 }
 
+function shouldForceQualifiedName(rawMod) {
+  return forceQualifiedNames.has(rawMod);
+}
+
 function applyHungerOverride(name, modshort, hunger) {
-  const key = displayName(name, modshort);
-  if (key in hungerOverrides) {
-    return hungerOverrides[key];
-  }
+  const key = qualifiedName(name, modshort);
+  if (key in hungerOverrides) return hungerOverrides[key];
   return hunger;
 }
 
@@ -317,6 +315,13 @@ function buildIdToTag(parsedLevel) {
   return map;
 }
 
+function finalizeOutputName(name, modshort, rawMod) {
+  if (shouldForceQualifiedName(rawMod)) {
+    return qualifiedName(name, modshort);
+  }
+  return name;
+}
+
 async function processPlayer(playerPath, parsedLevel, repo) {
   let playerBuf = fs.readFileSync(playerPath);
   if (isGzipped(playerBuf)) {
@@ -348,20 +353,21 @@ async function processPlayer(playerPath, parsedLevel, repo) {
     const special = normalizeSpecialItem(tag, x.damage, x.hunger);
     if (special) {
       special.h = applyHungerOverride(special.n, special.m, special.h);
-      return special;
+      special.n = finalizeOutputName(special.n, special.m, special.rawMod);
+      return { n: special.n, m: special.m, h: special.h };
     }
 
     const lookup = lookupItem(repo, tag, x.damage);
-
     if (!lookup.item) {
       return makeNotFoundResult(tag, x.damage, repo, lookup.candidates);
     }
 
-    const { name, modshort } = normalizeNameAndMod(tag, x.damage, lookup.item);
+    const { name, modshort, rawMod } = normalizeNameAndMod(tag, x.damage, lookup.item);
     const hunger = applyHungerOverride(name, modshort, x.hunger);
+    const finalName = finalizeOutputName(name, modshort, rawMod);
 
     return {
-      n: name,
+      n: finalName,
       m: modshort,
       h: hunger
     };
